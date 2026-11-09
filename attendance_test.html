@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ur" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>آفس حاضری</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1a1d21;--mu:#667;--ac:#0f766e;--bd:#dde1e6;--late:#b45309;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171a;--card:#1e2226;--tx:#eef0f2;--mu:#9aa3ab;--ac:#2dd4bf;--bd:#333a41;--late:#fbbf24}}
+:root[data-theme="dark"]{--bg:#14171a;--card:#1e2226;--tx:#eef0f2;--mu:#9aa3ab;--ac:#2dd4bf;--bd:#333a41;--late:#fbbf24}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:"Noto Nastaliq Urdu","Segoe UI",Tahoma,sans-serif;line-height:1.9;padding:16px;max-width:560px;margin-inline:auto}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+h1{font-size:20px;margin:0 0 4px}.m{color:var(--mu);font-size:13px}
+input{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:inherit;margin:8px 0}
+button{width:100%;padding:16px;border:0;border-radius:12px;background:var(--ac);color:#fff;font:inherit;font-size:18px}
+:root[data-theme="dark"] button{color:#06201d}
+#clock{font-size:34px;text-align:center;direction:ltr}
+#msg{margin-top:10px;text-align:center;min-height:24px}
+.ov{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:8px 6px;border-bottom:1px solid var(--bd);text-align:right;white-space:nowrap}
+.l{color:var(--late)}
+</style>
+</head>
+<body>
+<div class="c">
+<h1>آفس حاضری</h1>
+<div class="m">وقت: صبح 9 بجے سے شام 7 بجے تک</div>
+<div id="clock"></div>
+<input id="name" placeholder="اپنا نام لکھیں" autocomplete="name">
+<button id="go">فنگر سے حاضری لگائیں</button>
+<div id="msg"></div>
+</div>
+<div class="c">
+<div class="m">تاریخ منتخب کریں</div>
+<input type="date" id="dt" style="direction:ltr">
+<div class="ov"><table><thead><tr><th>نام</th><th>آمد</th><th>روانگی</th><th>حالت</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div id="empty" class="m"></div>
+</div>
+<script>
+var START=9*60, LATE=START+15, END=19*60;
+var $=function(i){return document.getElementById(i)};
+function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
+function pad(n){return String(n).padStart(2,"0")}
+function today(){var d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())}
+function hm(d){return pad(d.getHours())+":"+pad(d.getMinutes())}
+function tick(){$("clock").textContent=hm(new Date())+":"+pad(new Date().getSeconds())}
+setInterval(tick,1000);tick();
+$("name").value=ls("att_name")||"";
+$("dt").value=today();
+function say(t,bad){$("msg").textContent=t;$("msg").style.color=bad?"var(--late)":"var(--ac)"}
+var API_URL=""; // بیک اینڈ تیار ہو تو یہاں اپنا لنک لکھیں، مثلاً https://yoursite.com/api/attendance
+function load(){try{return JSON.parse(localStorage.getItem("att_data")||"{}")}catch(e){return{}}}
+function store(o){try{localStorage.setItem("att_data",JSON.stringify(o))}catch(e){}}
+function b64(a){return btoa(String.fromCharCode.apply(null,new Uint8Array(a)))}
+function unb64(s){return Uint8Array.from(atob(s),function(c){return c.charCodeAt(0)})}
+async function finger(){
+  if(!window.PublicKeyCredential||!navigator.credentials)throw new Error("اس فون/براؤزر میں فنگر سپورٹ نہیں");
+  var ch=crypto.getRandomValues(new Uint8Array(32));
+  var saved=ls("att_cred");
+  if(saved){
+    await navigator.credentials.get({publicKey:{challenge:ch,timeout:60000,userVerification:"required",allowCredentials:[{type:"public-key",id:unb64(saved)}]}});
+  }else{
+    var c=await navigator.credentials.create({publicKey:{challenge:ch,rp:{name:"Office Attendance"},
+      user:{id:crypto.getRandomValues(new Uint8Array(16)),name:$("name").value,displayName:$("name").value},
+      pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
+      authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required"},timeout:60000}});
+    ls("att_cred",b64(c.rawId));
+  }
+  return ls("att_cred");
+}
+$("go").onclick=async function(){
+  var nm=$("name").value.trim();
+  if(!nm){say("پہلے اپنا نام لکھیں",1);return}
+  var now=new Date(),mins=now.getHours()*60+now.getMinutes();
+  if(mins<START-60||mins>END+120){say("ابھی حاضری کا وقت نہیں ہے",1);return}
+  ls("att_name",nm);
+  var cred;
+  try{cred=await finger()}catch(e){say("فنگر تصدیق نہیں ہوئی: "+(e.message||e.name),1);return}
+  var d=today(),all=load(),key=d+"_"+nm,r=all[key],type;
+  if(!r){r=all[key]={name:nm,date:d,in:hm(now),out:"",late:mins>LATE};type="in"}
+  else{r.out=hm(now);type="out"}
+  store(all);
+  if(API_URL){
+    try{await fetch(API_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:nm,date:d,time:hm(now),type:type,late:r.late,credential:cred})})}
+    catch(e){say("سرور پر نہیں پہنچا، فون میں محفوظ ہے",1);show();return}
+  }
+  say((type=="in"?"آمد":"روانگی")+" درج ہو گئی ✔ "+hm(now));show();
+};
+function show(){
+  var d=$("dt").value,all=load();
+  var rs=Object.keys(all).map(function(k){return all[k]}).filter(function(r){return r.date==d}).sort(function(a,b){return a.in<b.in?-1:1});
+  var tb=$("rows");tb.textContent="";
+  rs.forEach(function(r){
+    var tr=document.createElement("tr");
+    [r.name,r.in,r.out||"—",r.late?"دیر سے":"وقت پر"].forEach(function(t,i){
+      var td=document.createElement("td");td.textContent=t;if(i==3&&r.late)td.className="l";tr.appendChild(td)});
+    tb.appendChild(tr)});
+  $("empty").textContent=rs.length?"کل حاضر: "+rs.length:"اس دن کوئی حاضری نہیں";
+}
+$("dt").onchange=show;show();
+</script>
+</body>
+</html>
